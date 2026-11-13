@@ -23,9 +23,10 @@ This is the reference procedure to boot the Darwin kernel (XNU) of HakiOS on the
 | Display | partial | ABL's framebuffer at `0xFC800000`, 1260x2800, 32 bits; no GPU |
 | USB (`xl`) | partial | the controller, eUSB2 PHY and repeater as ABL left them |
 | XNU kernel and `hello` in user space | works | on cpu0; the log is fetched over USB |
-| Darwin 16.5 home screen | works | software drawing on cpu0; no touch yet |
+| Darwin 16.5 home screen | works | software drawing on cpu0 |
+| Touch | works | FocalTech 0x5672 on SPI; taps land where the finger is |
 | Other cores | not tried | the GIC redistributor stride is unchecked |
-| UFS, touch, buttons, GPU, audio, Wi-Fi, modem | missing | see `device.conf` |
+| UFS, buttons, GPU, audio, Wi-Fi, modem | missing | see `device.conf` |
 
 `device.conf` is the record. A part is `works` only after it was seen on the phone.
 
@@ -177,7 +178,7 @@ The panic is expected: `hello` is the first process, and it exits when it has pr
 
 ## 7. The Darwin user space (home screen)
 
-Seen on the phone on 2026-11-13: Darwin 16.5's home screen, drawn in software on cpu0, with no touch.
+Seen on the phone on 2026-11-13: Darwin 16.5's home screen, drawn in software on cpu0, with touch.
 
 1. Get the restore image yourself: `iPhone10,3,iPhone10,6_16.5_20F66_Restore.ipsw`, 6 165 698 198 bytes,
    SHA-1 `6ee6e5b447902dbb36a3991ca20d032d6b4cc759`. Apple's own server has it
@@ -194,19 +195,50 @@ Seen on the phone on 2026-11-13: Darwin 16.5's home screen, drawn in software on
 
    `make loader-open` writes a placeholder identity. Run `xnuloader/mkidentity.sh` after it, or Darwin
    does not start.
-3. Boot:
+3. Build the kernel with metroid's configuration (touch is in it):
 
    ```sh
-   adb reboot bootloader
-   DEVICE=metroid XL_FIRMWARE=u-boot ./xl enter      # the metroid U-Boot image, from RAM
-   ./xl ramdisk userland/system.apfs                 # 2361 MB in 58 s (40 MB/s)
-   XL_SECS=300 XL_CMDLINE="" ./xl run                # XL_CMDLINE="-v" shows the kernel's log over the screen
+   make metroid_defconfig && make config            # boot-arguments: ufs=2 touchscreen=1 touch_board=metroid
+   make kernel                                      # hakios-kernel; xnu-deps/setup.sh fetches the SDKs on first use
+   ```
+
+4. Boot. The HakiOS loader's own fastboot reports the serial `xnuloader`, not the phone's: with more than one
+   device on adb or fastboot, name the phone until it leaves Android, then the loader.
+
+   ```sh
+   adb -s <phone serial> reboot bootloader
+   tools/mkubootimg.py -d metroid -u u-boot/build-metroid/u-boot.bin -l xnuloader/loader.efi \
+       -p build/metroid-payload.bin -o build/hakios-u-boot-metroid.img
+   fastboot -s <phone serial> boot build/hakios-u-boot-metroid.img      # RAM only
+   export ANDROID_SERIAL=xnuloader                                      # from here on, the loader
+   ./xl ramdisk userland/system.apfs                                     # 2361 MB in 57 s (41 MB/s)
+   XL_SECS=300 XL_CMDLINE="$(tools/hakios-config.py args)" ./xl run     # add -v for the kernel's log on screen
    ./xl reboot
    ```
 
-Known limits: no touch and no buttons (no driver for this phone yet), one core, no GPU. With `-v`, the
-kernel's log is drawn over the home screen. `./xl screenshot` says "the loader has no display": the loader
-does not yet answer `getvar screen` on this phone.
+   With one device attached, `DEVICE=metroid XL_FIRMWARE=u-boot ./xl enter` does the first three steps.
+
+Known limits: no buttons, one core, no GPU. With `-v`, the kernel's log is drawn over the home screen.
+`./xl screenshot` says "the loader has no display" (the loader does not answer `getvar screen` on this phone),
+but `fastboot oem screenshot` and `fastboot get_staged` give the 1260x2800 framebuffer (BGRA, 5040 bytes a row).
+
+## 8. Touch
+
+The touch screen is a FocalTech chip (ID `0x5672`) on SPI: QUP1 serial engine 4, gpio16 MISO, gpio17 MOSI,
+gpio18 CLK, gpio19 CS, interrupt gpio176, reset gpio189. HakiOS's touch driver (`drivers/input/hakios.goodix.c`)
+selects this phone with `touch_board=metroid`. What it took, each found on the phone:
+
+| Problem | What was seen | Fix |
+|---|---|---|
+| Power through RPMh | the RSC reports version 3.8 | the slot registers of RSC version 3, read from `RSC_DRV_ID`, not assumed |
+| The SPI pins did nothing | every read 00 00, while the interrupt line fell hundreds of times under a finger | set the eGPIO ownership bit (12) on pins that have one (bit 11), as Linux's `pinctrl-msm.c` does |
+| Taps landed at the top left | raw report `00 21 \| 00 ff \| 00 68 00 5f bf 08 ...` for a tap at the top left | the point starts at byte 4, with 12-bit pixel coordinates; the range is 1260 x 2800 |
+| No clock driver for the serial engine | (SM8735's clocks are not known here) | the four pins driven by hand |
+| The chip's firmware | it is in the chip's own flash | no upload: the FT3680 firmware built in for redwood is never sent to this chip |
+
+Supplies: `ldod1` (iovcc, 1.8 V) and `ldob22` (vdd, 3.0 V), through RPMh. The driver repeats its bring-up lines
+every 30 s after a failure and every 60 s when it runs, so the end of the kernel's log, which the host gets,
+always says what happened.
 
 ## If something goes wrong
 
@@ -234,7 +266,6 @@ Before a system update, use Magisk's "Install to inactive slot", or patch the ne
 
 ## Next steps
 
-1. The Darwin user space from your own IPSW (`docs/getting-started/qemu.md` in the common repository).
-2. Touch (FocalTech on SPI) and the buttons (PMK8550 PON, a PMIC GPIO).
-3. All 8 cores: check the GIC redistributor stride (`0x200000` for 8 cores in the tree).
-4. UFS, then the GPU.
+1. The buttons (PMK8550 PON for power and volume down, a PMIC GPIO for volume up).
+2. All 8 cores: check the GIC redistributor stride (`0x200000` for 8 cores in the tree).
+3. UFS, then the GPU.
