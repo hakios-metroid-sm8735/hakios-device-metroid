@@ -25,8 +25,9 @@ This is the reference procedure to boot the Darwin kernel (XNU) of HakiOS on the
 | XNU kernel and `hello` in user space | works | on cpu0; the log is fetched over USB |
 | Darwin 16.5 home screen | works | software drawing on cpu0 |
 | Touch | works | FocalTech 0x5672 on SPI; taps land where the finger is |
+| Buttons | works | power, volume up and volume down, through the PMIC arbiter version 7 |
 | Other cores | not tried | the GIC redistributor stride is unchecked |
-| UFS, buttons, GPU, audio, Wi-Fi, modem | missing | see `device.conf` |
+| UFS, GPU, audio, Wi-Fi, modem | missing | see `device.conf` |
 
 `device.conf` is the record. A part is `works` only after it was seen on the phone.
 
@@ -240,6 +241,24 @@ Supplies: `ldod1` (iovcc, 1.8 V) and `ldob22` (vdd, 3.0 V), through RPMh. The dr
 every 30 s after a failure and every 60 s when it runs, so the end of the kernel's log, which the host gets,
 always says what happened.
 
+## 9. Buttons
+
+None of the three keys is a pin of the SoC. HakiOS's buttons driver (`drivers/input/hakios.buttons.c`) reads them
+from the PMICs over SPMI, and it only reads: it writes nothing to a PMIC. `buttons_board=metroid` selects:
+
+| Key | Where |
+|---|---|
+| Power (the side button) | the PON of the PMK8550: slave 0, `0x1300`, bit `0x80` of its status |
+| Volume down | the same PON, bit `0x40` |
+| Volume up | GPIO6 of the PMXR2230: slave 1, `0x8d00` (GPIOs from `0x8800`), active low |
+
+The SoC's PMIC arbiter is version 7 (SM8450 and later), whose tables moved from version 5's (redwood). From the
+phone's device tree (`qcom,spmi@c42d000`): core `0x0c400000`, cnfg `0x0c42d000`, obsrvr `0x0c440000`. The
+channel table is at core + `0x2000` + 4n and an observer channel is `0x8000` per system and `0x20` per channel
+(Linux `drivers/spmi/spmi-pmic-arb.c`). The device tree's sizes agree: core `0x3000` = `0x2000` + 1024 x 4,
+obsrvr `0x80000` = 16 systems x `0x8000`. Seen on the phone on 2026-11-13: every press and release of the three
+keys, and 0 failed reads in 30006 (8 us each).
+
 ## If something goes wrong
 
 | You see | Do |
@@ -266,6 +285,6 @@ Before a system update, use Magisk's "Install to inactive slot", or patch the ne
 
 ## Next steps
 
-1. The buttons (PMK8550 PON for power and volume down, a PMIC GPIO for volume up).
-2. All 8 cores: check the GIC redistributor stride (`0x200000` for 8 cores in the tree).
-3. UFS, then the GPU.
+1. All 8 cores: the GIC redistributors are `0x40000` apart (`redistributor-stride` in the device tree; Android
+   finds CPU0 at `0x17180000` and CPU1 at `0x171c0000`), and the region is `0x200000`.
+2. UFS, then the GPU.
