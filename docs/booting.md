@@ -23,10 +23,10 @@ This is the reference procedure to boot the Darwin kernel (XNU) of HakiOS on the
 | Display | partial | ABL's framebuffer at `0xFC800000`, 1260x2800, 32 bits; no GPU |
 | USB (`xl`) | partial | the controller, eUSB2 PHY and repeater as ABL left them |
 | XNU kernel and `hello` in user space | works | on cpu0; the log is fetched over USB |
-| Darwin 16.5 home screen | works | software drawing on cpu0 |
+| Darwin 16.5 home screen | works | software drawing |
 | Touch | works | FocalTech 0x5672 on SPI; taps land where the finger is |
 | Buttons | works | power, volume up and volume down, through the PMIC arbiter version 7 |
-| Other cores | not tried | the GIC redistributor stride is unchecked |
+| All 8 cores | works | `cpus=8`: each core finds its GIC redistributor, `0x40000` apart |
 | UFS, GPU, audio, Wi-Fi, modem | missing | see `device.conf` |
 
 `device.conf` is the record. A part is `works` only after it was seen on the phone.
@@ -179,7 +179,7 @@ The panic is expected: `hello` is the first process, and it exits when it has pr
 
 ## 7. The Darwin user space (home screen)
 
-Seen on the phone on 2026-11-13: Darwin 16.5's home screen, drawn in software on cpu0, with touch.
+Seen on the phone on 2026-11-13: Darwin 16.5's home screen, drawn in software, with touch, buttons and 8 cores.
 
 1. Get the restore image yourself: `iPhone10,3,iPhone10,6_16.5_20F66_Restore.ipsw`, 6 165 698 198 bytes,
    SHA-1 `6ee6e5b447902dbb36a3991ca20d032d6b4cc759`. Apple's own server has it
@@ -219,7 +219,7 @@ Seen on the phone on 2026-11-13: Darwin 16.5's home screen, drawn in software on
 
    With one device attached, `DEVICE=metroid XL_FIRMWARE=u-boot ./xl enter` does the first three steps.
 
-Known limits: no buttons, one core, no GPU. With `-v`, the kernel's log is drawn over the home screen.
+Known limits: no GPU, no cpufreq (the cores run at what the firmware left). With `-v`, the kernel's log is drawn over the home screen.
 `./xl screenshot` says "the loader has no display" (the loader does not answer `getvar screen` on this phone),
 but `fastboot oem screenshot` and `fastboot get_staged` give the 1260x2800 framebuffer (BGRA, 5040 bytes a row).
 
@@ -259,6 +259,21 @@ channel table is at core + `0x2000` + 4n and an observer channel is `0x8000` per
 obsrvr `0x80000` = 16 systems x `0x8000`. Seen on the phone on 2026-11-13: every press and release of the three
 keys, and 0 failed reads in 30006 (8 us each).
 
+## 10. All 8 cores
+
+The kernel finds each core's GIC redistributor by walking the redistributor region frame by frame
+(`osfmk/arm64/gic_v3_irq.c`, `gic_find_redistributor()`). It walked in fixed `0x20000` steps, a GICv3 frame. On
+SM8735 the frames are `0x40000` apart: the phone's device tree says `redistributor-stride = <0x0 0x40000>` over
+`0x200000`, and Android finds CPU0's frame at `0x17180000` and CPU1's at `0x171c0000`. Only cpu0's frame, at the
+start, could be found.
+
+- The loader gives the kernel the region's size (`0x200000`) and the stride, as `redistributor-stride` in the GIC
+  node (`platform_metroid`: `gic_redist_size`, `gic_redist_stride`).
+- The kernel walks the frames by that stride; without it, by `0x20000` as before.
+
+Seen on the phone on 2026-11-13 with `cpus=8`: "8 processors running", cpu1's redistributor found, no panic,
+and the system faster to use than on one core. `CONFIG_CPUS=8` is in metroid's configuration.
+
 ## If something goes wrong
 
 | You see | Do |
@@ -285,6 +300,5 @@ Before a system update, use Magisk's "Install to inactive slot", or patch the ne
 
 ## Next steps
 
-1. All 8 cores: the GIC redistributors are `0x40000` apart (`redistributor-stride` in the device tree; Android
-   finds CPU0 at `0x17180000` and CPU1 at `0x171c0000`), and the region is `0x200000`.
-2. UFS, then the GPU.
+1. UFS (storage), then the GPU.
+2. cpufreq: the cores' clocks (the driver is SC7280's).
