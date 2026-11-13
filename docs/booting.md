@@ -27,7 +27,8 @@ This is the reference procedure to boot the Darwin kernel (XNU) of HakiOS on the
 | Touch | works | FocalTech 0x5672 on SPI; taps land where the finger is |
 | Buttons | works | power, volume up and volume down, through the PMIC arbiter version 7 |
 | All 8 cores | works | `cpus=8`: each core finds its GIC redistributor, `0x40000` apart |
-| UFS, GPU, audio, Wi-Fi, modem | missing | see `device.conf` |
+| UFS (storage) | partial | U-Boot reads all 6 units and their partitions; the kernel's reads not yet tried |
+| GPU, audio, Wi-Fi, modem | missing | see `device.conf` |
 
 `device.conf` is the record. A part is `works` only after it was seen on the phone.
 
@@ -281,8 +282,23 @@ and the system faster to use than on one core. `CONFIG_CPUS=8` is in metroid's c
 | No `18d1:d00d` device after the boot | USB did not come up under U-Boot; the loader runs the kernel once, holds the screen (`end_hold=`), then resets |
 | The phone does not respond | hold power for about 15 s: the phone restarts into Android |
 
-Nothing in these steps writes to the phone's storage. The U-Boot here has no UFS driver, so the loader
-does not even write its log to `logdump`.
+Nothing in these steps writes to the phone's storage. U-Boot reads UFS (below), but this phone has no
+`logdump` partition, so the loader does not write its log, and the kernel's writes (`ufs_write=`) stay off.
+
+### How U-Boot reads UFS
+
+U-Boot has no SM8735 UFS PHY tables and no clock driver. So it takes the controller over as ABL left it
+(`hakios,adopt-running-link` in the U-Boot device tree; `u-boot/files/drivers/ufs/`):
+
+1. It checks that the controller is enabled, the device present, the lists ready and nothing in flight.
+2. It stops ABL's transfer lists and puts in its own. It does no reset, no PHY setup and no link startup.
+3. It takes the link out of hibernate (`DME_HIBERNATE_EXIT`). ABL leaves the link in hibernate.
+4. It sends START STOP UNIT (power condition active) to the UFS device well-known unit (`0xD0`). ABL's
+   last command puts the device in power-down.
+
+Without steps 3 and 4 no command completes, and U-Boot appears to hang on its logo. The loader's
+`fastboot oem ufsadopt wake` runs the same steps by itself, with each step in its log; `oem ufssurvey`
+lists what U-Boot found.
 
 ## Root (optional, for analysis)
 
@@ -298,5 +314,5 @@ Before a system update, use Magisk's "Install to inactive slot", or patch the ne
 
 ## Next steps
 
-1. UFS (storage), then the GPU.
+1. UFS: the kernel's reads (`ufs=2`), then the root file system from the phone's storage.
 2. cpufreq: the cores' clocks (the driver is SC7280's).

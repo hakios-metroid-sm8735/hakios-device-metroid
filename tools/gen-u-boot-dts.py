@@ -126,6 +126,20 @@ HEAD = """// SPDX-License-Identifier: BSD-3-Clause
 		 * No clocks, resets, power domain or PHY on purpose: U-Boot has no SM8735 clock driver, so the controller,
 		 * the eUSB2 PHY and its repeater are used as ABL left them after its own fastboot. Not yet seen to work.
 		 */
+		/*
+		 * The storage, taken over as ABL left it (HakiOS's U-Boot, hakios,adopt-running-link): ABL leaves the UFS
+		 * controller enabled, its link up and its device initialised (HCE 1, HCS 0x10f, read by the loader's
+		 * "oem ufsprobe" on 13 November), and U-Boot has neither the SM8735's UFS PHY tables nor its clocks. So no
+		 * reset, PHY, link startup or power mode change: only U-Boot's own transfer lists are put in.
+		 */
+		ufs_mem_hc: ufshc@1d84000 {
+			compatible = "qcom,ufshc";
+			reg = <0x0 0x01d84000 0x0 0x3000>;
+			iommus = <&apps_smmu 0x60 0x0>;
+			dma-coherent;
+			hakios,adopt-running-link;
+		};
+
 		usb_1: usb@a600000 {
 			compatible = "qcom,snps-dwc3";
 			reg = <0x0 0x0a600000 0x0 0xfc100>;
