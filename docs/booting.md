@@ -203,25 +203,23 @@ Seen on the phone on 2026-11-13: Darwin 16.5's home screen, drawn in software, w
    make kernel                                      # hakios-kernel; xnu-deps/setup.sh fetches the SDKs on first use
    ```
 
-4. Boot. The HakiOS loader's own fastboot reports the serial `xnuloader`, not the phone's: with more than one
-   device on adb or fastboot, name the phone until it leaves Android, then the loader.
+4. Boot. With more than one device on adb or fastboot, give `xl` the phone's serial: `XL_SERIAL` names the phone
+   in Android and in its bootloader, and the HakiOS loader by its own serial, `xnuloader`, once it is up.
 
    ```sh
-   adb -s <phone serial> reboot bootloader
-   tools/mkubootimg.py -d metroid -u u-boot/build-metroid/u-boot.bin -l xnuloader/loader.efi \
-       -p build/metroid-payload.bin -o build/hakios-u-boot-metroid.img
-   fastboot -s <phone serial> boot build/hakios-u-boot-metroid.img      # RAM only
-   export ANDROID_SERIAL=xnuloader                                      # from here on, the loader
-   ./xl ramdisk userland/system.apfs                                     # 2361 MB in 57 s (41 MB/s)
-   XL_SECS=300 XL_CMDLINE="$(tools/hakios-config.py args)" ./xl run     # add -v for the kernel's log on screen
+   export XL_SERIAL=<phone serial>
+   DEVICE=metroid XL_FIRMWARE=u-boot ./xl enter                 # Android -> bootloader -> U-Boot -> loader, RAM only
+   ./xl ramdisk userland/system.apfs                            # 2361 MB in 57 s (41 MB/s)
+   XL_SECS=300 XL_CMDLINE="$(tools/hakios-config.py args) $(tr '\n' ' ' < devices/metroid/soc.args)" ./xl run
+   ./xl screenshot logs/screen.png                              # 1260 x 2800, after the run
    ./xl reboot
    ```
 
-   With one device attached, `DEVICE=metroid XL_FIRMWARE=u-boot ./xl enter` does the first three steps.
+   With `cpus=8` the kernel has every core, so the loader is not on USB while it runs: `xl` waits until the run's
+   time is up (`XL_SECS`), and a run cannot be stopped from the host. Hold power for about 15 s to end one early.
 
 Known limits: no GPU, no cpufreq (the cores run at what the firmware left). With `-v`, the kernel's log is drawn over the home screen.
-`./xl screenshot` says "the loader has no display" (the loader does not answer `getvar screen` on this phone),
-but `fastboot oem screenshot` and `fastboot get_staged` give the 1260x2800 framebuffer (BGRA, 5040 bytes a row).
+`./xl screenshot` gives the 1260x2800 framebuffer as a PNG.
 
 ## 8. Touch
 
