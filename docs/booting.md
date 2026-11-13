@@ -23,6 +23,7 @@ This is the reference procedure to boot the Darwin kernel (XNU) of HakiOS on the
 | Display | partial | ABL's framebuffer at `0xFC800000`, 1260x2800, 32 bits; no GPU |
 | USB (`xl`) | partial | the controller, eUSB2 PHY and repeater as ABL left them |
 | XNU kernel and `hello` in user space | works | on cpu0; the log is fetched over USB |
+| Darwin 16.5 home screen | works | software drawing on cpu0; no touch yet |
 | Other cores | not tried | the GIC redistributor stride is unchecked |
 | UFS, touch, buttons, GPU, audio, Wi-Fi, modem | missing | see `device.conf` |
 
@@ -173,6 +174,39 @@ panic(cpu 0 caller ...): initproc failed to start ...
 ```
 
 The panic is expected: `hello` is the first process, and it exits when it has printed.
+
+## 7. The Darwin user space (home screen)
+
+Seen on the phone on 2026-11-13: Darwin 16.5's home screen, drawn in software on cpu0, with no touch.
+
+1. Get the restore image yourself: `iPhone10,3,iPhone10,6_16.5_20F66_Restore.ipsw`, 6 165 698 198 bytes,
+   SHA-1 `6ee6e5b447902dbb36a3991ca20d032d6b4cc759`. Apple's own server has it
+   (`updates.cdn-apple.com`). Check the size and the SHA-1 before you continue.
+2. Unpack it and build the images. On macOS, `sysimage/unpack.sh` calls `7z`: give it Homebrew's 7-Zip 23 or
+   newer (`7zz`) under that name, because `p7zip` cannot read APFS.
+
+   ```sh
+   sysimage/unpack.sh iPhone10,3,iPhone10,6_16.5_20F66_Restore.ipsw     # sysimage/, about 5.6 GB
+   PREBUILT=1 REST=1 SYSTEM=1 userland/build.sh                          # userland/system.apfs, 2.48 GB
+   xnuloader/mkidentity.sh                                               # the identity from the IPSW
+   xnuloader/build.sh                                                    # the loader, with platform_metroid
+   ```
+
+   `make loader-open` writes a placeholder identity. Run `xnuloader/mkidentity.sh` after it, or Darwin
+   does not start.
+3. Boot:
+
+   ```sh
+   adb reboot bootloader
+   DEVICE=metroid XL_FIRMWARE=u-boot ./xl enter      # the metroid U-Boot image, from RAM
+   ./xl ramdisk userland/system.apfs                 # 2361 MB in 58 s (40 MB/s)
+   XL_SECS=300 XL_CMDLINE="" ./xl run                # XL_CMDLINE="-v" shows the kernel's log over the screen
+   ./xl reboot
+   ```
+
+Known limits: no touch and no buttons (no driver for this phone yet), one core, no GPU. With `-v`, the
+kernel's log is drawn over the home screen. `./xl screenshot` says "the loader has no display": the loader
+does not yet answer `getvar screen` on this phone.
 
 ## If something goes wrong
 
