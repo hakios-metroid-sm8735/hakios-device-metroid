@@ -1,0 +1,311 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * The Nothing Phone (3) (metroid, SM8735 "Tuna") for HakiOS's U-Boot: first light only.
+ *
+ * U-Boot has no clock, pinctrl or PHY support for SM8735 (v2026.07), so this tree describes only what needs no
+ * driver: the panel's framebuffer as ABL left it, the PSCI firmware interface, and the memory that firmware and the
+ * remote processors keep. USB is tried as ABL left it (below); no UFS, no keys yet.
+ *
+ * The size of RAM is not here: ABL writes it into the device tree it hands over, and U-Boot reads it from there
+ * (arch/arm/mach-snapdragon/board.c, board_fdt_blob_setup()).
+ *
+ * The reservations are the 40 fixed no-map regions of the phone's own live tree (/sys/firmware/fdt, build
+ * C5.0-260924-2115), generated, not edited by hand. The reusable pools are left out: Android lends them on demand,
+ * and two of them (trust_ui_vm, oem_vm) cover the HakiOS payload window at 0xF0000000.
+ */
+
+/dts-v1/;
+
+/ {
+	model = "Nothing Phone (3)";
+	compatible = "nothing,metroid", "qcom,sm8735";
+	chassis-type = "handset";
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	/* what ABL matches against: SM8735 (soc_id 655 = 0x28f) v1, the QRD board (ro.boot.dtbo_idx=145) */
+	qcom,msm-id = <0x28f 0x10000>;
+	qcom,board-id = <0xb 0>;
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * The panel as ABL left it (cont_splash, splash_region): 1260 x 2800. 32 bits a pixel is assumed, as on
+		 * redwood; not yet seen on this phone. At 0xFC800000 the HakiOS loader knows the phone by it
+		 * (xnuloader/loader.c, platform_metroid). No clocks: U-Boot keeps the display running by not touching it.
+		 */
+		framebuffer0: framebuffer@fc800000 {
+			compatible = "simple-framebuffer";
+			reg = <0x0 0xfc800000 0x0 (1260 * 2800 * 4)>;
+			width = <1260>;
+			height = <2800>;
+			stride = <(1260 * 4)>;
+			format = "a8r8g8b8";
+		};
+	};
+
+	psci {
+		compatible = "arm,psci-1.0";
+		method = "smc";
+	};
+
+	soc@0 {
+		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * The SMMU that USB's DMA goes through (stream 0x40 in the phone's tree). U-Boot's qcom-hyp-smmu only maps
+		 * the streams of the devices it uses as bypass, on an SMMU ABL has already set up.
+		 */
+		apps_smmu: iommu@15000000 {
+			compatible = "qcom,smmu-500", "arm,mmu-500";
+			reg = <0x0 0x15000000 0x0 0x100000>;
+			#iommu-cells = <2>;
+		};
+
+		/*
+		 * USB as a device, for the HakiOS loader's fastboot (xl). Laid out as SM8750's upstream node (flat
+		 * qcom,snps-dwc3, qscratch at +0xf8800), which the phone's core_base (0xa600000) matches.
+		 * No clocks, resets, power domain or PHY on purpose: U-Boot has no SM8735 clock driver, so the controller,
+		 * the eUSB2 PHY and its repeater are used as ABL left them after its own fastboot. Not yet seen to work.
+		 */
+		usb_1: usb@a600000 {
+			compatible = "qcom,snps-dwc3";
+			reg = <0x0 0x0a600000 0x0 0xfc100>;
+			iommus = <&apps_smmu 0x40 0x0>;
+			dr_mode = "peripheral";
+			maximum-speed = "high-speed";
+			snps,hird-threshold = /bits/ 8 <0x0>;
+			snps,usb2-gadget-lpm-disable;
+			snps,usb2-lpm-disable;
+			snps,dis_u2_susphy_quirk;
+			snps,dis_enblslpm_quirk;
+			snps,has-lpm-erratum;
+		};
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/* the panel's memory, as ABL reserved it */
+		cont-splash@fc800000 {
+			reg = <0x0 0xfc800000 0x0 0x2b00000>;
+			no-map;
+		};
+
+		/*
+		 * Where the HakiOS loader takes its payload from (PAYLOAD_BASE, 64 MiB with the panic log in its last MiB).
+		 * Mapped (no no-map): the hakios command writes the payload here, and nothing else in U-Boot may take it.
+		 */
+		hakios-payload@f0000000 {
+			reg = <0x0 0xf0000000 0x0 0x4000000>;
+		};
+
+		gunyah-hyp@80000000 {
+			reg = <0x0 0x80000000 0x0 0xe00000>;
+			no-map;
+		};
+
+		cpusys-vm@80e00000 {
+			reg = <0x0 0x80e00000 0x0 0x400000>;
+			no-map;
+		};
+
+		cpucp@81200000 {
+			reg = <0x0 0x81200000 0x0 0x100000>;
+			no-map;
+		};
+
+		xbl-dtlog@81a00000 {
+			reg = <0x0 0x81a00000 0x0 0x40000>;
+			no-map;
+		};
+
+		aop-image@81c00000 {
+			reg = <0x0 0x81c00000 0x0 0x60000>;
+			no-map;
+		};
+
+		aop-cmd-db@81c60000 {
+			reg = <0x0 0x81c60000 0x0 0x20000>;
+			no-map;
+		};
+
+		aop-config@81c80000 {
+			reg = <0x0 0x81c80000 0x0 0x20000>;
+			no-map;
+		};
+
+		tme-crash-dump@81ca0000 {
+			reg = <0x0 0x81ca0000 0x0 0x40000>;
+			no-map;
+		};
+
+		tme-log@81ce0000 {
+			reg = <0x0 0x81ce0000 0x0 0x4000>;
+			no-map;
+		};
+
+		uefi-log@81ce4000 {
+			reg = <0x0 0x81ce4000 0x0 0x10000>;
+			no-map;
+		};
+
+		chipinfo@81cf4000 {
+			reg = <0x0 0x81cf4000 0x0 0x1000>;
+			no-map;
+		};
+
+		smem@81d00000 {
+			reg = <0x0 0x81d00000 0x0 0x200000>;
+			no-map;
+		};
+
+		cpucp-scandump@82200000 {
+			reg = <0x0 0x82200000 0x0 0x180000>;
+			no-map;
+		};
+
+		adsp-mhi@82380000 {
+			reg = <0x0 0x82380000 0x0 0x20000>;
+			no-map;
+		};
+
+		soccp-sdi@823a0000 {
+			reg = <0x0 0x823a0000 0x0 0x40000>;
+			no-map;
+		};
+
+		pmic-minii-dump@823e0000 {
+			reg = <0x0 0x823e0000 0x0 0x80000>;
+			no-map;
+		};
+
+		pvm-fw@824a0000 {
+			reg = <0x0 0x824a0000 0x0 0x100000>;
+			no-map;
+		};
+
+		hyp-mem-database@825a0000 {
+			reg = <0x0 0x825a0000 0x0 0x60000>;
+			no-map;
+		};
+
+		global-sync@82600000 {
+			reg = <0x0 0x82600000 0x0 0x100000>;
+			no-map;
+		};
+
+		tz-stat@82700000 {
+			reg = <0x0 0x82700000 0x0 0x100000>;
+			no-map;
+		};
+
+		dsm-partition-1@84a00000 {
+			reg = <0x0 0x84a00000 0x0 0x3700000>;
+			no-map;
+		};
+
+		mpss@88100000 {
+			reg = <0x0 0x88100000 0x0 0xcd00000>;
+			no-map;
+		};
+
+		q6-mpss-dtb@94e00000 {
+			reg = <0x0 0x94e00000 0x0 0x80000>;
+			no-map;
+		};
+
+		ipa-fw@94e80000 {
+			reg = <0x0 0x94e80000 0x0 0x10000>;
+			no-map;
+		};
+
+		ipa-gsi@94e90000 {
+			reg = <0x0 0x94e90000 0x0 0xa000>;
+			no-map;
+		};
+
+		gpu-microcode@94e9a000 {
+			reg = <0x0 0x94e9a000 0x0 0x2000>;
+			no-map;
+		};
+
+		camera@94f00000 {
+			reg = <0x0 0x94f00000 0x0 0x800000>;
+			no-map;
+		};
+
+		camera-2@95700000 {
+			reg = <0x0 0x95700000 0x0 0x800000>;
+			no-map;
+		};
+
+		video@95f00000 {
+			reg = <0x0 0x95f00000 0x0 0x800000>;
+			no-map;
+		};
+
+		cvp@96700000 {
+			reg = <0x0 0x96700000 0x0 0x700000>;
+			no-map;
+		};
+
+		soccp@96e00000 {
+			reg = <0x0 0x96e00000 0x0 0x180000>;
+			no-map;
+		};
+
+		wpss@97000000 {
+			reg = <0x0 0x97000000 0x0 0x1900000>;
+			no-map;
+		};
+
+		cdsp@98900000 {
+			reg = <0x0 0x98900000 0x0 0x1400000>;
+			no-map;
+		};
+
+		q6-cdsp-dtb@99d00000 {
+			reg = <0x0 0x99d00000 0x0 0x80000>;
+			no-map;
+		};
+
+		q6-adsp-dtb@99d80000 {
+			reg = <0x0 0x99d80000 0x0 0x80000>;
+			no-map;
+		};
+
+		adspslpi@99e00000 {
+			reg = <0x0 0x99e00000 0x0 0x5a80000>;
+			no-map;
+		};
+
+		wlan-msa@a6400000 {
+			reg = <0x0 0xa6400000 0x0 0xc00000>;
+			no-map;
+		};
+
+		xbl-ramdump@b8000000 {
+			reg = <0x0 0xb8000000 0x0 0x1c0000>;
+			no-map;
+		};
+
+		tz-merged@d8000000 {
+			reg = <0x0 0xd8000000 0x0 0x600000>;
+			no-map;
+		};
+
+		llcc-lpi@ff800000 {
+			reg = <0x0 0xff800000 0x0 0x600000>;
+			no-map;
+		};
+	};
+};

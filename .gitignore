@@ -1,0 +1,2 @@
+# vendor data from the phone's own firmware: never committed (docs/porting: no vendor files in a repository)
+prebuilt/device-tree.dtb

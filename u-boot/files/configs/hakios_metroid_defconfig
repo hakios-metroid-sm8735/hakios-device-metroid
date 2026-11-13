@@ -1,0 +1,28 @@
+# HakiOS's U-Boot for the Nothing Phone (3) (metroid, SM8735): started by ABL from RAM (fastboot boot), never flashed.
+# First light only: U-Boot v2026.07 has no clock, pinctrl or PHY driver for SM8735, so the tree describes the framebuffer,
+# PSCI and the reserved memory, and nothing that needs a driver. The loader and its payload come in the boot image's ramdisk.
+#include "qcom_defconfig"
+
+CONFIG_ARM=y
+CONFIG_DEFAULT_DEVICE_TREE="qcom/sm8735-nothing-metroid"
+CONFIG_ENV_DEFAULT_ENV_TEXT_FILE="board/qualcomm/hakios-metroid.env"
+CONFIG_CMD_HAKIOS=y
+# the HakiOS loader talks fastboot to the host through Qualcomm's USB device protocol (xl); without a USB node in the
+# tree it finds no controller and goes on without it, as it does in QEMU without a host
+CONFIG_EFI_QCOM_USB_DEVICE=y
+
+# a panic stays on the screen: the only way to read it on this phone for now
+CONFIG_PANIC_HANG=y
+CONFIG_CONSOLE_RECORD=y
+CONFIG_CONSOLE_RECORD_INIT_F=y
+CONFIG_CONSOLE_RECORD_OUT_SIZE=0x6000
+# CONFIG_REQUIRE_SERIAL_CONSOLE is not set
+
+# The HakiOS loader keeps U-Boot's boot services while the kernel runs: a watchdog U-Boot started would bite mid-run.
+# CONFIG_WATCHDOG_AUTOSTART is not set
+
+# Nothing on the phone's storage is ever written by this U-Boot: no capsule updates (they flash a partition through DFU)
+# CONFIG_EFI_RUNTIME_UPDATE_CAPSULE is not set
+# CONFIG_EFI_CAPSULE_ON_DISK is not set
+# CONFIG_EFI_CAPSULE_FIRMWARE_RAW is not set
+# CONFIG_TOOLS_MKEFICAPSULE is not set
