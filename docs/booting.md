@@ -27,7 +27,7 @@ This is the reference procedure to boot the Darwin kernel (XNU) of HakiOS on the
 | Touch | works | FocalTech 0x5672 on SPI; taps land where the finger is |
 | Buttons | works | power, volume up and volume down, through the PMIC arbiter version 7 |
 | All 8 cores | works | `cpus=8`: each core finds its GIC redistributor, `0x40000` apart |
-| UFS (storage) | partial | U-Boot reads all 6 units and their partitions; the kernel's reads not yet tried |
+| UFS (storage) | partial | U-Boot and the kernel's own driver read all 6 units (0 errors in 951 MB); not yet with all 8 cores |
 | GPU, audio, Wi-Fi, modem | missing | see `device.conf` |
 
 `device.conf` is the record. A part is `works` only after it was seen on the phone.
@@ -314,5 +314,5 @@ Before a system update, use Magisk's "Install to inactive slot", or patch the ne
 
 ## Next steps
 
-1. UFS: the kernel's reads (`ufs=2`), then the root file system from the phone's storage.
+1. UFS with all 8 cores: `bootcpu=7` with 4 or more cores stops the loader (the watchdog resets the phone).
 2. cpufreq: the cores' clocks (the driver is SC7280's).
