@@ -1,0 +1,4 @@
+# HakiOS defconfig for the Nothing Phone (3) (metroid): the common kernel, the sm8735 family's facts, and this device's own.
+#include common_defconfig
+#include sm8735.config
+#include metroid.config
